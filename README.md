@@ -1,47 +1,46 @@
-# Document Template Kit (V1) — Designer + Evaluator + HTML2PDF
+# doc-template-kit
 
-This workspace contains:
+React + TypeScript components for building **JSON-driven document templates**:
 
-- A reusable library you can import into other React projects.
-- A small demo app (Vite) that hosts the Designer (`/designer`) and Evaluator (`/evaluator`).
+- `TemplateDesigner`: visually design a template (drag/move, resize, duplicate, guides, undo/redo) with live preview and **PDF preview**.
+- `TemplateEvaluator`: fill inputs, compute vars, preview, and **Print** (opens the generated PDF preview).
 
-The library provides:
+Templates support safe template strings like `{{ inputs.name }}` and derived variables.
 
-- `TemplateDesigner`: interactive editor (move/resize/duplicate, guides, undo/redo) with a live preview and PDF preview.
-- `TemplateEvaluator`: runtime view to load a template/package, enter inputs, and preview HTML/PDF.
+This package is **ESM-only**.
 
-Templates are JSON-driven and support safe expression evaluation and template strings like `{{ inputs.name }}`.
-
-## Run the demo
-
-From the `app/` folder:
+## Install
 
 ```bash
-npm install
-npm run dev
+npm i doc-template-kit
 ```
 
-## Build the library
+### Peer dependencies
 
-```bash
-npm run build:lib
-```
+You must provide these in your app:
 
-Outputs:
+- `react`
+- `react-dom`
 
-- `dist-lib/` (ESM bundle)
-- `dist-types/` (TypeScript declarations)
+## Quick start
 
-## Using the library in another project
+### Designer
 
-This repo currently builds the library locally. In another React app, you typically:
-
-```ts
-import React from 'react'
+```tsx
+import * as React from 'react'
 import { TemplateDesigner, type DocumentTemplateV1 } from 'doc-template-kit'
 
 export function MyDesigner() {
-	const [template, setTemplate] = React.useState<DocumentTemplateV1>(/* load or create */)
+	const [template, setTemplate] = React.useState<DocumentTemplateV1>(() => ({
+		meta: { name: 'My Template' },
+		page: { size: 'LETTER', orientation: 'portrait' },
+		inputs: [],
+		constants: {},
+		variables: {},
+		elements: [],
+	}))
+
+	// Optional: used for previewing computed text while designing.
 	const [sampleInputs, setSampleInputs] = React.useState<Record<string, unknown>>({})
 
 	return (
@@ -50,40 +49,100 @@ export function MyDesigner() {
 			onTemplateChange={setTemplate}
 			sampleInputs={sampleInputs}
 			onSampleInputsChange={setSampleInputs}
+			onSave={(nextTemplate) => {
+				// Persist however you want (download, API, DB, etc.)
+				console.log('save', nextTemplate)
+			}}
 		/>
 	)
 }
 ```
 
-And for runtime rendering:
+Notes:
 
-```ts
-import React from 'react'
+- `sampleInputs` / `onSampleInputsChange` are optional. If you omit `onSampleInputsChange`, the designer manages sample inputs internally.
+
+### Evaluator
+
+```tsx
+import * as React from 'react'
 import { TemplateEvaluator, type DocumentTemplateV1 } from 'doc-template-kit'
 
-export function MyPreview({ template }: { template: DocumentTemplateV1 }) {
+export function MyEvaluator({ template }: { template: DocumentTemplateV1 }) {
 	const [inputs, setInputs] = React.useState<Record<string, unknown>>({})
+
 	return (
 		<TemplateEvaluator
 			template={template}
 			inputs={inputs}
 			onInputsChange={setInputs}
+			onPrintOpen={({ inputs, vars }) => {
+				// Useful for persistence/audit logs:
+				// - inputs: user-entered values
+				// - vars: evaluated variables (computed)
+				console.log({ inputs, vars })
+			}}
 		/>
 	)
 }
 ```
 
-## Notes
+Evaluator notes:
 
-- PDF generation uses `html2pdf.js` (internally `html2canvas` + `jsPDF`) and opens the generated PDF in a new tab.
-- While previewing PDF from the Designer, selection overlays and alignment guides are suppressed so they don’t appear in the exported PDF.
+- `inputs` / `onInputsChange` can be omitted (uncontrolled mode).
+- `readOnly` is supported for re-printing previously saved documents.
 
-## TODO (missing features)
+## Images
+
+Image elements use an `imageRef` string.
+
+- By default (no resolver), `imageRef` is used as a same-origin URL (e.g. `/logo.png`).
+- You can optionally pass `assetResolver` to map a ref to a URL.
+- Images support `opacity` for watermark-like effects.
+
+## PDF preview / Print
+
+PDF generation uses `html2pdf.js` (internally `html2canvas` + `jsPDF`) and opens the generated PDF in a new tab.
+
+While generating the PDF from the Designer, selection overlays and guides are suppressed so they won’t appear in the output.
+
+## Expressions
+
+Template strings use `{{ ... }}` and are evaluated in a restricted expression environment.
+You can reference:
+
+- `inputs` (user values)
+- `constants`
+- `vars` (derived variables)
+
+The Designer includes a “Valid operations” modal listing supported operators and helper functions.
+
+## Repo / demo
+
+This repository includes a Vite demo app under `demo/`.
+
+From the repo root:
+
+```bash
+npm install
+npm run dev
+```
+
+Build demo (also builds the library first):
+
+```bash
+npm run build:demo
+```
+
+Build library only:
+
+```bash
+npm run build
+```
+
+## Roadmap (non-exhaustive)
 
 - Multi-page templates and page breaks
 - Header/footer regions
-- Richer table editor (columns UI, row styling, borders)
+- Richer table editor
 - Font family selection + font embedding strategy
-- Better image asset packaging workflow (bundle/import helpers)
-- More shapes (rectangles, circles) and gradients
-- Optional snapping (not just guides) for alignment
