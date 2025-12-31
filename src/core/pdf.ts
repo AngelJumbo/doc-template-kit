@@ -37,7 +37,7 @@ export async function openPdfPreviewFromElement(root: HTMLElement, template: Doc
   const mod: any = await import('html2pdf.js')
   const html2pdf: any = mod?.default ?? mod
 
-  const { wPt, hPt } = getPageSizePt(template.page.size, template.page.orientation)
+  const { wPt, hPt } = getPageSizePt(template.page.size, template.page.orientation, template.page.customSizePt)
 
   await (document as any).fonts?.ready
   await waitForImages(root)

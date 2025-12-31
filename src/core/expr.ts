@@ -26,6 +26,95 @@ function toNumber(value: unknown): number {
   return Number.NaN
 }
 
+function toDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    const t = value.getTime()
+    return Number.isNaN(t) ? null : value
+  }
+
+  if (typeof value === 'number') {
+    const d = new Date(value)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
+  if (typeof value === 'string') {
+    const s = value.trim()
+    if (!s) return null
+
+    // HTML date input yields YYYY-MM-DD.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [yy, mm, dd] = s.split('-').map((p) => Number(p))
+      const d = new Date(Date.UTC(yy!, (mm! - 1)!, dd!))
+      return Number.isNaN(d.getTime()) ? null : d
+    }
+
+    const d = new Date(s)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
+  return null
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function formatDateUtc(d: Date, pattern: string): string {
+  const YYYY = String(d.getUTCFullYear())
+  const YY = YYYY.slice(-2)
+  const MM = pad2(d.getUTCMonth() + 1)
+  const DD = pad2(d.getUTCDate())
+  const HH = pad2(d.getUTCHours())
+  const mm = pad2(d.getUTCMinutes())
+  const ss = pad2(d.getUTCSeconds())
+
+  return pattern
+    .replaceAll('YYYY', YYYY)
+    .replaceAll('YY', YY)
+    .replaceAll('MM', MM)
+    .replaceAll('DD', DD)
+    .replaceAll('HH', HH)
+    .replaceAll('mm', mm)
+    .replaceAll('ss', ss)
+}
+
+function daysInUtcMonth(year: number, month0: number): number {
+  // month0 is 0-based; day 0 of next month is last day of current month
+  return new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate()
+}
+
+function addMonthsUtc(date: Date, months: number): Date {
+  const y = date.getUTCFullYear()
+  const m = date.getUTCMonth()
+  const day = date.getUTCDate()
+  const hh = date.getUTCHours()
+  const mi = date.getUTCMinutes()
+  const ss = date.getUTCSeconds()
+  const ms = date.getUTCMilliseconds()
+
+  const total = m + months
+  const nextY = y + Math.floor(total / 12)
+  const nextM = ((total % 12) + 12) % 12
+
+  const maxDay = daysInUtcMonth(nextY, nextM)
+  const clampedDay = Math.min(day, maxDay)
+  return new Date(Date.UTC(nextY, nextM, clampedDay, hh, mi, ss, ms))
+}
+
+function addYearsUtc(date: Date, years: number): Date {
+  const y = date.getUTCFullYear() + years
+  const m = date.getUTCMonth()
+  const day = date.getUTCDate()
+  const hh = date.getUTCHours()
+  const mi = date.getUTCMinutes()
+  const ss = date.getUTCSeconds()
+  const ms = date.getUTCMilliseconds()
+
+  const maxDay = daysInUtcMonth(y, m)
+  const clampedDay = Math.min(day, maxDay)
+  return new Date(Date.UTC(y, m, clampedDay, hh, mi, ss, ms))
+}
+
 export type FunctionDoc = {
   signature: string
   description: string
@@ -130,6 +219,35 @@ export const FUNCTION_DOCS: Record<string, FunctionDoc> = {
     examples: ['json(inputs)', 'json(row)'],
     notes: ['Equivalent to JSON.stringify.'],
   },
+  now: {
+    signature: 'now()',
+    description: 'Returns the current date/time as a Date object.',
+    examples: ['now()', 'formatDate(now(), "YYYY-MM-DD")'],
+    notes: ['For template strings, use formatDate(...) to control output.'],
+  },
+  addDays: {
+    signature: 'addDays(date, days)',
+    description: 'Adds a number of days to a date and returns a new Date.',
+    examples: ['addDays(inputs.startDate, 30)', 'formatDate(addDays(now(), 7), "YYYY-MM-DD")'],
+    notes: ['Date inputs (type=date) are expected as YYYY-MM-DD strings.'],
+  },
+  addMonths: {
+    signature: 'addMonths(date, months)',
+    description: 'Adds a number of months to a date and returns a new Date (clamps to end-of-month when needed).',
+    examples: ['addMonths(inputs.startDate, 1)', 'formatDate(addMonths(inputs.startDate, 12), "YYYY-MM-DD")'],
+    notes: ['If the target month has fewer days (e.g. Jan 31 + 1 month), the day is clamped.'],
+  },
+  addYears: {
+    signature: 'addYears(date, years)',
+    description: 'Adds a number of years to a date and returns a new Date (clamps Feb 29 as needed).',
+    examples: ['addYears(inputs.startDate, 1)', 'formatDate(addYears(now(), 5), "YYYY-MM-DD")'],
+  },
+  formatDate: {
+    signature: 'formatDate(date, pattern?)',
+    description: 'Formats a date using a simple token pattern (UTC).',
+    examples: ['formatDate(inputs.startDate, "YYYY-MM-DD")', 'formatDate(now(), "YYYY-MM-DD HH:mm")'],
+    notes: ['Supported tokens: YYYY, YY, MM, DD, HH, mm, ss.', 'Date inputs (type=date) are YYYY-MM-DD strings.'],
+  },
 }
 
 export function defaultFunctions(): FunctionMap {
@@ -155,6 +273,35 @@ export function defaultFunctions(): FunctionMap {
     max: (...nums) => Math.max(...nums.map((n) => toNumber(n))),
     coalesce: (...vals) => vals.find((v) => v !== null && v !== undefined),
     json: (v) => JSON.stringify(v),
+
+    now: () => new Date(),
+    addDays: (date, days) => {
+      const d = toDate(date)
+      if (!d) return null
+      const n = toNumber(days)
+      if (!Number.isFinite(n)) return null
+      return new Date(d.getTime() + n * 24 * 60 * 60 * 1000)
+    },
+    addMonths: (date, months) => {
+      const d = toDate(date)
+      if (!d) return null
+      const n = toNumber(months)
+      if (!Number.isFinite(n)) return null
+      return addMonthsUtc(d, Math.trunc(n))
+    },
+    addYears: (date, years) => {
+      const d = toDate(date)
+      if (!d) return null
+      const n = toNumber(years)
+      if (!Number.isFinite(n)) return null
+      return addYearsUtc(d, Math.trunc(n))
+    },
+    formatDate: (date, pattern) => {
+      const d = toDate(date)
+      if (!d) return ''
+      const p = typeof pattern === 'string' && pattern.trim() ? pattern : 'YYYY-MM-DD'
+      return formatDateUtc(d, p)
+    },
   }
 }
 

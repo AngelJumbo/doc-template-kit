@@ -404,7 +404,7 @@ export function DocumentPreview({
   className?: string
   interaction?: PreviewInteraction
 }) {
-  const { wPt, hPt } = getPageSizePt(template.page.size, template.page.orientation)
+  const { wPt, hPt } = getPageSizePt(template.page.size, template.page.orientation, template.page.customSizePt)
   const wPx = ptToPx(wPt)
   const hPx = ptToPx(hPt)
 

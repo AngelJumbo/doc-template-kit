@@ -5,7 +5,7 @@ import { buildEvalContext } from '../core/evaluate'
 import { DocumentPreview } from '../core/render'
 import { openPdfPreviewFromElement } from '../core/pdf'
 import { TemplateInputForm } from './TemplateInputForm'
-import { clampNumber, getPageSizePt, pxToPt } from '../core/units'
+import { clampNumber, getPageSizePt, mmToPt, ptToMm, pxToPt } from '../core/units'
 import { defaultFunctions, FUNCTION_DOCS } from '../core/expr'
 
 function newId(prefix: string): string {
@@ -92,6 +92,36 @@ export function TemplateDesigner({
   const previewWrapRef = React.useRef<HTMLDivElement | null>(null)
   const templateRef = React.useRef(template)
 
+  const inputRowIdsRef = React.useRef<string[]>([])
+  const constantRowIdsRef = React.useRef<Map<string, string>>(new Map())
+  const varRowIdsRef = React.useRef<Map<string, string>>(new Map())
+  const constantKeyOrderRef = React.useRef<string[]>([])
+  const varKeyOrderRef = React.useRef<string[]>([])
+
+  const getInputRowId = React.useCallback((index: number) => {
+    const ids = inputRowIdsRef.current
+    while (ids.length <= index) ids.push(newId('inputRow'))
+    return ids[index]!
+  }, [])
+
+  const getConstantRowId = React.useCallback((key: string) => {
+    const map = constantRowIdsRef.current
+    const existing = map.get(key)
+    if (existing) return existing
+    const id = newId('constRow')
+    map.set(key, id)
+    return id
+  }, [])
+
+  const getVarRowId = React.useCallback((key: string) => {
+    const map = varRowIdsRef.current
+    const existing = map.get(key)
+    if (existing) return existing
+    const id = newId('varRow')
+    map.set(key, id)
+    return id
+  }, [])
+
   const isSampleInputsControlled = typeof onSampleInputsChange === 'function'
   const [uncontrolledSampleInputs, setUncontrolledSampleInputs] = React.useState<Record<string, unknown>>(
     () => sampleInputs ?? {},
@@ -140,6 +170,52 @@ export function TemplateDesigner({
   React.useEffect(() => {
     templateRef.current = template
   }, [template])
+
+  React.useEffect(() => {
+    // Keep input row IDs aligned with the inputs array length.
+    const ids = inputRowIdsRef.current
+    if (ids.length < template.inputs.length) {
+      while (ids.length < template.inputs.length) ids.push(newId('inputRow'))
+    } else if (ids.length > template.inputs.length) {
+      ids.splice(template.inputs.length)
+    }
+  }, [template.inputs.length])
+
+  React.useEffect(() => {
+    // Maintain stable ordering for constants in the UI (avoid object insertion-order jumps on rename).
+    const currentKeys = Object.keys(template.constants ?? {})
+    const order = constantKeyOrderRef.current
+
+    if (order.length === 0) {
+      constantKeyOrderRef.current = [...currentKeys]
+      return
+    }
+
+    // Remove deleted keys
+    const kept = order.filter((k) => currentKeys.includes(k))
+    // Append new keys
+    for (const k of currentKeys) {
+      if (!kept.includes(k)) kept.push(k)
+    }
+    constantKeyOrderRef.current = kept
+  }, [template.constants])
+
+  React.useEffect(() => {
+    // Maintain stable ordering for variables in the UI.
+    const currentKeys = Object.keys(template.variables ?? {})
+    const order = varKeyOrderRef.current
+
+    if (order.length === 0) {
+      varKeyOrderRef.current = [...currentKeys]
+      return
+    }
+
+    const kept = order.filter((k) => currentKeys.includes(k))
+    for (const k of currentKeys) {
+      if (!kept.includes(k)) kept.push(k)
+    }
+    varKeyOrderRef.current = kept
+  }, [template.variables])
 
   const pushHistory = React.useCallback((prev: DocumentTemplateV1) => {
     const hist = historyRef.current
@@ -191,6 +267,11 @@ export function TemplateDesigner({
   const elementsByZ = React.useMemo(() => {
     return [...template.elements].sort((a, b) => (a.rect.z ?? 0) - (b.rect.z ?? 0))
   }, [template.elements])
+
+  const pageSizePt = React.useMemo(
+    () => getPageSizePt(template.page.size, template.page.orientation, template.page.customSizePt),
+    [template.page.size, template.page.orientation, template.page.customSizePt],
+  )
 
   const applyZOrder = React.useCallback(
     (orderedIds: string[]) => {
@@ -355,8 +436,8 @@ export function TemplateDesigner({
   )
 
   const { wPt: pageWPt, hPt: pageHPt } = React.useMemo(
-    () => getPageSizePt(template.page.size, template.page.orientation),
-    [template.page.size, template.page.orientation],
+    () => getPageSizePt(template.page.size, template.page.orientation, template.page.customSizePt),
+    [template.page.size, template.page.orientation, template.page.customSizePt],
   )
 
   const nudgeSelectedBy = React.useCallback(
@@ -720,7 +801,7 @@ export function TemplateDesigner({
     const dxPt = 12
     const dyPt = 12
     const latest = templateRef.current
-    const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation)
+    const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
 
     const cloneBase: TemplateV1Element = {
       ...(el as any),
@@ -791,7 +872,7 @@ export function TemplateDesigner({
     const el = latest.elements.find((x) => x.id === id)
     if (!el) return
 
-    const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation)
+    const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
 
     dragMoveHistoryRef.current.base = latest
     dragMoveHistoryRef.current.didMove = false
@@ -843,6 +924,9 @@ export function TemplateDesigner({
       type: 'string' as const,
       required: false,
     }
+
+    inputRowIdsRef.current.push(newId('inputRow'))
+
     applyTemplateChange({ ...latest, inputs: [...latest.inputs, next] })
     setSampleInputs({ ...effectiveSampleInputs, [key]: '' })
   }
@@ -852,6 +936,9 @@ export function TemplateDesigner({
     const def = latest.inputs[index]
     if (!def) return
     const nextInputs = latest.inputs.filter((_, i) => i !== index)
+
+    inputRowIdsRef.current.splice(index, 1)
+
     applyTemplateChange({ ...latest, inputs: nextInputs })
 
     const nextValues: Record<string, unknown> = { ...effectiveSampleInputs }
@@ -863,6 +950,9 @@ export function TemplateDesigner({
     const latest = templateRef.current
     const existing = new Set(Object.keys(latest.constants ?? {}))
     const key = uniqKey('const', existing)
+
+    constantKeyOrderRef.current = [...constantKeyOrderRef.current, key]
+
     applyTemplateChange({
       ...latest,
       constants: { ...(latest.constants ?? {}), [key]: '' },
@@ -876,6 +966,21 @@ export function TemplateDesigner({
     const value = constants[prevKey]
     delete constants[prevKey]
     constants[nextKey] = value
+
+    const rowId = constantRowIdsRef.current.get(prevKey)
+    if (rowId) {
+      constantRowIdsRef.current.delete(prevKey)
+      constantRowIdsRef.current.set(nextKey, rowId)
+    }
+
+    const order = constantKeyOrderRef.current
+    const idx = order.indexOf(prevKey)
+    if (idx >= 0) {
+      const nextOrder = [...order]
+      nextOrder[idx] = nextKey
+      constantKeyOrderRef.current = nextOrder
+    }
+
     applyTemplateChange({ ...latest, constants })
   }
 
@@ -891,6 +996,10 @@ export function TemplateDesigner({
     const latest = templateRef.current
     const constants = { ...(latest.constants ?? {}) }
     delete constants[key]
+
+    constantRowIdsRef.current.delete(key)
+    constantKeyOrderRef.current = constantKeyOrderRef.current.filter((k) => k !== key)
+
     applyTemplateChange({ ...latest, constants })
   }
 
@@ -898,6 +1007,9 @@ export function TemplateDesigner({
     const latest = templateRef.current
     const existing = new Set(Object.keys(latest.variables ?? {}))
     const key = uniqKey('var', existing)
+
+    varKeyOrderRef.current = [...varKeyOrderRef.current, key]
+
     applyTemplateChange({
       ...latest,
       variables: { ...(latest.variables ?? {}), [key]: "''" },
@@ -911,6 +1023,21 @@ export function TemplateDesigner({
     const value = vars[prevKey]
     delete vars[prevKey]
     vars[nextKey] = value
+
+    const rowId = varRowIdsRef.current.get(prevKey)
+    if (rowId) {
+      varRowIdsRef.current.delete(prevKey)
+      varRowIdsRef.current.set(nextKey, rowId)
+    }
+
+    const order = varKeyOrderRef.current
+    const idx = order.indexOf(prevKey)
+    if (idx >= 0) {
+      const nextOrder = [...order]
+      nextOrder[idx] = nextKey
+      varKeyOrderRef.current = nextOrder
+    }
+
     applyTemplateChange({ ...latest, variables: vars })
   }
 
@@ -926,6 +1053,10 @@ export function TemplateDesigner({
     const latest = templateRef.current
     const vars = { ...(latest.variables ?? {}) }
     delete vars[key]
+
+    varRowIdsRef.current.delete(key)
+    varKeyOrderRef.current = varKeyOrderRef.current.filter((k) => k !== key)
+
     applyTemplateChange({ ...latest, variables: vars })
   }
 
@@ -1026,15 +1157,35 @@ export function TemplateDesigner({
                     onChange={(e) =>
                       (() => {
                         const latest = templateRef.current
+                        const nextSize = e.target.value as any
+
+                        if (nextSize === 'CUSTOM') {
+                          const current = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
+                          const basePortrait =
+                            latest.page.orientation === 'landscape'
+                              ? { wPt: current.hPt, hPt: current.wPt }
+                              : { wPt: current.wPt, hPt: current.hPt }
+
+                          applyTemplateChange({
+                            ...latest,
+                            page: { ...latest.page, size: nextSize, customSizePt: basePortrait },
+                          })
+                          return
+                        }
+
                         applyTemplateChange({
                           ...latest,
-                          page: { ...latest.page, size: e.target.value as any },
+                          page: { ...latest.page, size: nextSize, customSizePt: undefined },
                         })
                       })()
                     }
                   >
                     <option value="LETTER">LETTER</option>
+                    <option value="LEGAL">LEGAL</option>
+                    <option value="A3">A3</option>
                     <option value="A4">A4</option>
+                    <option value="A5">A5</option>
+                    <option value="CUSTOM">CUSTOM</option>
                   </select>
                 </label>
 
@@ -1057,6 +1208,62 @@ export function TemplateDesigner({
                   </select>
                 </label>
               </div>
+
+              {template.page.size === 'CUSTOM' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>Width (mm)</div>
+                    <input
+                      type="number"
+                      step={1}
+                      min={10}
+                      value={Math.round(ptToMm(pageSizePt.wPt))}
+                      onChange={(e) => {
+                        const latest = templateRef.current
+                        const nextWidthPt = mmToPt(Number(e.target.value))
+                        const current = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
+                        const heightPt = current.hPt
+
+                        const basePortrait =
+                          latest.page.orientation === 'landscape'
+                            ? { wPt: heightPt, hPt: nextWidthPt }
+                            : { wPt: nextWidthPt, hPt: heightPt }
+
+                        applyTemplateChange({
+                          ...latest,
+                          page: { ...latest.page, customSizePt: basePortrait },
+                        })
+                      }}
+                    />
+                  </label>
+
+                  <label style={{ display: 'grid', gap: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>Height (mm)</div>
+                    <input
+                      type="number"
+                      step={1}
+                      min={10}
+                      value={Math.round(ptToMm(pageSizePt.hPt))}
+                      onChange={(e) => {
+                        const latest = templateRef.current
+                        const nextHeightPt = mmToPt(Number(e.target.value))
+                        const current = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
+                        const widthPt = current.wPt
+
+                        const basePortrait =
+                          latest.page.orientation === 'landscape'
+                            ? { wPt: nextHeightPt, hPt: widthPt }
+                            : { wPt: widthPt, hPt: nextHeightPt }
+
+                        applyTemplateChange({
+                          ...latest,
+                          page: { ...latest.page, customSizePt: basePortrait },
+                        })
+                      }}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
           )}
 
@@ -1259,7 +1466,11 @@ export function TemplateDesigner({
                                 const latest = templateRef.current
                                 const el = latest.elements.find((x) => x.id === selected.id)
                                 if (!el || el.type !== 'line') return
-                                const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation)
+                                const { wPt, hPt } = getPageSizePt(
+                                  latest.page.size,
+                                  latest.page.orientation,
+                                  latest.page.customSizePt,
+                                )
                                 const next = clampLineToPage(normalizeLineFromEndpoints(el, nextPts), wPt, hPt)
                                 applyTemplateChange(updateElement(latest, next))
                               }
@@ -1742,7 +1953,7 @@ export function TemplateDesigner({
               </div>
               <div style={{ display: 'grid', gap: 10 }}>
                 {template.inputs.map((def, idx) => (
-                  <div key={`${def.key}_${idx}`} style={{ border: '1px solid #E5E7EB', borderRadius: 8, padding: 10 }}>
+                  <div key={getInputRowId(idx)} style={{ border: '1px solid #E5E7EB', borderRadius: 8, padding: 10 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <label style={{ display: 'grid', gap: 4 }}>
                         <div style={{ fontSize: 12, fontWeight: 600 }}>Key</div>
@@ -1803,8 +2014,11 @@ export function TemplateDesigner({
                 <button onClick={addConstant}>+ Add</button>
               </div>
               <div style={{ display: 'grid', gap: 10 }}>
-                {Object.entries(template.constants ?? {}).map(([k, v]) => (
-                  <div key={k} style={{ border: '1px solid #E5E7EB', borderRadius: 8, padding: 10 }}>
+                {constantKeyOrderRef.current
+                  .filter((k) => Object.prototype.hasOwnProperty.call(template.constants ?? {}, k))
+                  .map((k) => [k, (template.constants ?? {})[k]] as const)
+                  .map(([k, v]) => (
+                  <div key={getConstantRowId(k)} style={{ border: '1px solid #E5E7EB', borderRadius: 8, padding: 10 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 8, alignItems: 'end' }}>
                       <label style={{ display: 'grid', gap: 4 }}>
                         <div style={{ fontSize: 12, fontWeight: 600 }}>Key</div>
@@ -1843,8 +2057,11 @@ export function TemplateDesigner({
                 <button onClick={addVar}>+ Add</button>
               </div>
               <div style={{ display: 'grid', gap: 10 }}>
-                {Object.entries(template.variables ?? {}).map(([k, expr]) => (
-                  <div key={k} style={{ border: '1px solid #E5E7EB', borderRadius: 8, padding: 10 }}>
+                {varKeyOrderRef.current
+                  .filter((k) => Object.prototype.hasOwnProperty.call(template.variables ?? {}, k))
+                  .map((k) => [k, (template.variables ?? {})[k]] as const)
+                  .map(([k, expr]) => (
+                  <div key={getVarRowId(k)} style={{ border: '1px solid #E5E7EB', borderRadius: 8, padding: 10 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 8, alignItems: 'end' }}>
                       <label style={{ display: 'grid', gap: 4 }}>
                         <div style={{ fontSize: 12, fontWeight: 600 }}>Key</div>
@@ -2063,7 +2280,7 @@ export function TemplateDesigner({
                 resizeHistoryRef.current.base = latest
                 resizeHistoryRef.current.didMove = false
 
-                const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation)
+                const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
                 setResizeDrag({
                   id,
                   handle,
@@ -2091,7 +2308,7 @@ export function TemplateDesigner({
                 lineEndpointHistoryRef.current.base = latest
                 lineEndpointHistoryRef.current.didMove = false
 
-                const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation)
+                const { wPt, hPt } = getPageSizePt(latest.page.size, latest.page.orientation, latest.page.customSizePt)
                 setLineEndpointDrag({
                   id,
                   endpoint,

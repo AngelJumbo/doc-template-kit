@@ -1,5 +1,5 @@
 export type SchemaVersion = 'docTemplate-v1'
-export type PageSize = 'A4' | 'LETTER'
+export type PageSize = 'A3' | 'A4' | 'A5' | 'LETTER' | 'LEGAL' | 'CUSTOM'
 export type PageOrientation = 'portrait' | 'landscape'
 
 export type InputType = 'string' | 'number' | 'boolean' | 'date'
@@ -28,6 +28,8 @@ export interface TemplatePage {
   size: PageSize
   orientation: PageOrientation
   marginPt: PageMarginsPt
+  /** Only used when size === 'CUSTOM'. Stored as portrait base dimensions in points. */
+  customSizePt?: { wPt: number; hPt: number }
 }
 
 export interface InputDefV1 {

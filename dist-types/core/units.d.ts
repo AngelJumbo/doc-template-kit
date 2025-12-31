@@ -1,8 +1,13 @@
 import type { PageOrientation, PageSize } from './types';
-export declare function getPageSizePt(size: PageSize, orientation: PageOrientation): {
+export declare function getPageSizePt(size: PageSize, orientation: PageOrientation, customSizePt?: {
+    wPt: number;
+    hPt: number;
+}): {
     wPt: number;
     hPt: number;
 };
+export declare function mmToPt(mm: number): number;
+export declare function ptToMm(pt: number): number;
 export declare function ptToPx(pt: number): number;
 export declare function pxToPt(px: number): number;
 export declare function clampNumber(value: number, min: number, max: number): number;
