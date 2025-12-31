@@ -92,6 +92,7 @@ function TextEl({
   const style: React.CSSProperties = {
     ...rectStyle(el.rect),
     fontSize: el.style?.fontSizePt ? ptToPx(el.style.fontSizePt) : undefined,
+    fontFamily: el.style?.fontFamily,
     fontWeight: el.style?.fontWeight,
     fontStyle: el.style?.fontStyle,
     textAlign: el.style?.textAlign,
@@ -328,8 +329,22 @@ function TableEl({ el, ctx, interaction }: { el: TableElementV1; ctx: EvalContex
 
 function ImageEl({ el, url, interaction }: { el: ImageElementV1; url: string; interaction?: PreviewInteraction }) {
   const fit = el.fit ?? 'contain'
-  const objectFit: React.CSSProperties['objectFit'] = fit === 'stretch' ? 'fill' : fit
   const opacity = typeof el.opacity === 'number' ? Math.max(0, Math.min(1, el.opacity)) : 1
+
+  const isStretch = fit === 'stretch'
+  const isCover = fit === 'cover'
+
+  const imgStyle: React.CSSProperties = isStretch
+    ? { width: '100%', height: '100%', objectFit: 'fill' }
+    : isCover
+      ? { width: '100%', height: '100%', objectFit: 'cover' }
+      : {
+          // Robust aspect-ratio preservation for PDF capture (html2canvas may ignore object-fit).
+          width: 'auto',
+          height: 'auto',
+          maxWidth: '100%',
+          maxHeight: '100%',
+        }
 
   return (
     <div
@@ -338,6 +353,10 @@ function ImageEl({ el, url, interaction }: { el: ImageElementV1; url: string; in
         outline: interaction?.selectedId === el.id ? '2px solid #6366F1' : undefined,
         outlineOffset: 1,
         cursor: interaction ? 'move' : undefined,
+        overflow: 'hidden',
+        display: isStretch || isCover ? 'block' : 'flex',
+        alignItems: isStretch || isCover ? undefined : 'center',
+        justifyContent: isStretch || isCover ? undefined : 'center',
       }}
       onPointerDown={(e) => interaction?.onElementPointerDown?.(el.id, e)}
       onClick={() => interaction?.onElementClick?.(el.id)}
@@ -345,7 +364,7 @@ function ImageEl({ el, url, interaction }: { el: ImageElementV1; url: string; in
       <img
         src={url}
         alt={el.imageRef}
-        style={{ width: '100%', height: '100%', objectFit, display: 'block', opacity }}
+        style={{ ...imgStyle, display: 'block', opacity }}
         crossOrigin="anonymous"
       />
 

@@ -1627,6 +1627,58 @@ export function TemplateDesigner({
                                 <option value="right">right</option>
                               </select>
                             </label>
+
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>Font family</div>
+                              <select
+                                value={selected.style?.fontFamily ?? ''}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'text') return
+
+                                  const raw = e.target.value
+                                  const nextFontFamily = raw === '' ? undefined : raw
+                                  const nextStyle: TextStyleV1 = {
+                                    ...(el.style ?? {}),
+                                    fontFamily: nextFontFamily,
+                                  }
+
+                                  applyTemplateChange(updateElement(latest, { ...el, style: nextStyle } as any))
+                                }}
+                              >
+                                <option value="">(default)</option>
+                                <option value="system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">Sans (system)</option>
+                                <option value="Georgia, 'Times New Roman', Times, serif">Serif</option>
+                                <option value="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace">
+                                  Mono
+                                </option>
+                              </select>
+                            </label>
+
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>Font size (pt)</div>
+                              <input
+                                type="number"
+                                step={0.5}
+                                min={1}
+                                value={selected.style?.fontSizePt ?? 12}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'text') return
+
+                                  const raw = e.target.value
+                                  const nextFontSizePt = raw === '' ? undefined : Number(raw)
+                                  const nextStyle: TextStyleV1 = {
+                                    ...(el.style ?? {}),
+                                    fontSizePt: Number.isFinite(nextFontSizePt as any) ? (nextFontSizePt as any) : undefined,
+                                  }
+
+                                  applyTemplateChange(updateElement(latest, { ...el, style: nextStyle } as any))
+                                }}
+                              />
+                            </label>
                           </div>
 
                           <div style={{ display: 'grid', gap: 8 }}>
@@ -1833,6 +1885,23 @@ export function TemplateDesigner({
                                 applyTemplateChange(updateElement(latest, { ...el, imageRef: e.target.value }))
                               }}
                             />
+                          </label>
+
+                          <label style={{ display: 'grid', gap: 4 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>Fit</div>
+                            <select
+                              value={selected.fit ?? 'contain'}
+                              onChange={(e) => {
+                                const latest = templateRef.current
+                                const el = latest.elements.find((x) => x.id === selected.id)
+                                if (!el || el.type !== 'image') return
+                                applyTemplateChange(updateElement(latest, { ...el, fit: e.target.value as any }))
+                              }}
+                            >
+                              <option value="contain">Keep aspect ratio (contain)</option>
+                              <option value="cover">Fill + crop (cover)</option>
+                              <option value="stretch">Stretch (no aspect ratio)</option>
+                            </select>
                           </label>
 
                           <label style={{ display: 'grid', gap: 4 }}>

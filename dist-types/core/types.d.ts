@@ -45,6 +45,8 @@ export interface BaseElementV1 {
 }
 export interface TextStyleV1 {
     fontSizePt?: number;
+    /** CSS font-family string (e.g. "Arial, sans-serif"). */
+    fontFamily?: string;
     fontWeight?: number | 'normal' | 'bold';
     fontStyle?: 'normal' | 'italic';
     textAlign?: 'left' | 'center' | 'right';
