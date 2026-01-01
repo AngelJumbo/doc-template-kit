@@ -78,6 +78,10 @@ function formatDateUtc(d: Date, pattern: string): string {
     .replaceAll('ss', ss)
 }
 
+function formatDateIntlUtc(d: Date, locale: string, options: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(d)
+}
+
 function daysInUtcMonth(year: number, month0: number): number {
   // month0 is 0-based; day 0 of next month is last day of current month
   return new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate()
@@ -245,8 +249,17 @@ export const FUNCTION_DOCS: Record<string, FunctionDoc> = {
   formatDate: {
     signature: 'formatDate(date, pattern?)',
     description: 'Formats a date using a simple token pattern (UTC).',
-    examples: ['formatDate(inputs.startDate, "YYYY-MM-DD")', 'formatDate(now(), "YYYY-MM-DD HH:mm")'],
-    notes: ['Supported tokens: YYYY, YY, MM, DD, HH, mm, ss.', 'Date inputs (type=date) are YYYY-MM-DD strings.'],
+    examples: [
+      'formatDate(inputs.startDate, "YYYY-MM-DD")',
+      'formatDate(now(), "YYYY-MM-DD HH:mm")',
+      'formatDate(inputs.startDate, "ES_LONG")',
+      'formatDate(inputs.startDate, "ES_LONG_DEL")',
+    ],
+    notes: [
+      'Supported tokens: YYYY, YY, MM, DD, HH, mm, ss.',
+      'Also supports presets: ES_LONG (e.g. "01 de noviembre de 2026"), ES_LONG_DEL (e.g. "01 de noviembre del 2026").',
+      'Date inputs (type=date) are YYYY-MM-DD strings.',
+    ],
   },
 }
 
@@ -299,7 +312,20 @@ export function defaultFunctions(): FunctionMap {
     formatDate: (date, pattern) => {
       const d = toDate(date)
       if (!d) return ''
-      const p = typeof pattern === 'string' && pattern.trim() ? pattern : 'YYYY-MM-DD'
+      const raw = typeof pattern === 'string' ? pattern.trim() : ''
+      const p = raw || 'YYYY-MM-DD'
+
+      const preset = raw.toUpperCase()
+      if (preset === 'ES_LONG' || preset === 'ES_LONG_DEL') {
+        // Example: "01 de noviembre de 2026" (no hardcoded month names)
+        const base = formatDateIntlUtc(d, 'es', { day: '2-digit', month: 'long', year: 'numeric' })
+        if (preset === 'ES_LONG_DEL') {
+          // Convert trailing "de 2026" into "del 2026" without touching month names.
+          return base.replace(/\sde\s(\d{4})$/, ' del $1')
+        }
+        return base
+      }
+
       return formatDateUtc(d, p)
     },
   }
