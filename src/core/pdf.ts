@@ -62,6 +62,27 @@ export async function openPdfPreviewFromElement(root: HTMLElement, template: Doc
     .toPdf()
 
   const pdf: any = await worker.get('pdf')
+
+  // The template model is single-page today. html2pdf/jsPDF sometimes adds an extra blank page
+  // due to subtle rounding/overflow; keep only the first page.
+  try {
+    const getPageCount =
+      typeof pdf?.getNumberOfPages === 'function'
+        ? () => pdf.getNumberOfPages()
+        : typeof pdf?.internal?.getNumberOfPages === 'function'
+          ? () => pdf.internal.getNumberOfPages()
+          : null
+
+    const pageCount = getPageCount ? Number(getPageCount()) : 1
+    if (pageCount > 1 && typeof pdf?.deletePage === 'function') {
+      for (let i = pageCount; i >= 2; i -= 1) {
+        pdf.deletePage(i)
+      }
+    }
+  } catch {
+    // ignore (best-effort cleanup)
+  }
+
   const blob: Blob = pdf.output('blob')
 
   const url = URL.createObjectURL(blob)
