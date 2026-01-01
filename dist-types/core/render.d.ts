@@ -9,6 +9,15 @@ export type PreviewInteraction = {
         xPts: number[];
         yPts: number[];
     };
+    spacingGuidesPt?: {
+        lines: Array<{
+            x1Pt: number;
+            y1Pt: number;
+            x2Pt: number;
+            y2Pt: number;
+            label: string;
+        }>;
+    };
     onElementResizePointerDown?: (id: string, handle: 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw', e: React.PointerEvent) => void;
 };
 export declare function DocumentPreview({ template, ctx, assetResolver, className, interaction, }: {

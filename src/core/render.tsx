@@ -38,6 +38,9 @@ export type PreviewInteraction = {
   onElementClick?: (id: string) => void
   onLineEndpointPointerDown?: (id: string, endpoint: 'start' | 'end', e: React.PointerEvent) => void
   alignmentGuidesPt?: { xPts: number[]; yPts: number[] }
+  spacingGuidesPt?: {
+    lines: Array<{ x1Pt: number; y1Pt: number; x2Pt: number; y2Pt: number; label: string }>
+  }
   onElementResizePointerDown?: (
     id: string,
     handle: 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw',
@@ -501,6 +504,37 @@ export function DocumentPreview({
           }}
         />
       ))}
+
+      {interaction?.spacingGuidesPt?.lines?.length ? (
+        <svg
+          width="100%"
+          height="100%"
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9999 }}
+        >
+          {interaction.spacingGuidesPt.lines.map((l, i) => {
+            const x1 = ptToPx(l.x1Pt)
+            const y1 = ptToPx(l.y1Pt)
+            const x2 = ptToPx(l.x2Pt)
+            const y2 = ptToPx(l.y2Pt)
+            const mx = (x1 + x2) / 2
+            const my = (y1 + y2) / 2
+            return (
+              <g key={`sg_${i}`}>
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#6366F1" strokeWidth={1} opacity={0.9} />
+                <text
+                  x={mx}
+                  y={my}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  style={{ fontSize: 12, fill: '#6366F1', stroke: '#ffffff', strokeWidth: 4, paintOrder: 'stroke' as any }}
+                >
+                  {l.label}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      ) : null}
 
       {sortElements(template.elements).map((el) => {
         if (!evalBoolean(el.visibleIf, ctx)) return null

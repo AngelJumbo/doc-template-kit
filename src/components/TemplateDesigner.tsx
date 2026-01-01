@@ -73,6 +73,14 @@ type ResizeDragState = {
   pageHPt: number
 }
 
+type SpacingGuideLinePt = {
+  x1Pt: number
+  y1Pt: number
+  x2Pt: number
+  y2Pt: number
+  label: string
+}
+
 export function TemplateDesigner({
   template,
   onTemplateChange,
@@ -91,6 +99,34 @@ export function TemplateDesigner({
   const [selectedId, setSelectedId] = React.useState<string | null>(template.elements[0]?.id ?? null)
   const previewWrapRef = React.useRef<HTMLDivElement | null>(null)
   const templateRef = React.useRef(template)
+
+  const [showNudgeGuides, setShowNudgeGuides] = React.useState(false)
+  const nudgeGuidesTimerRef = React.useRef<number | null>(null)
+
+  const triggerNudgeGuides = React.useCallback(() => {
+    setShowNudgeGuides(true)
+    if (nudgeGuidesTimerRef.current != null) window.clearTimeout(nudgeGuidesTimerRef.current)
+    nudgeGuidesTimerRef.current = window.setTimeout(() => {
+      setShowNudgeGuides(false)
+      nudgeGuidesTimerRef.current = null
+    }, 450)
+  }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (nudgeGuidesTimerRef.current != null) window.clearTimeout(nudgeGuidesTimerRef.current)
+    }
+  }, [])
+
+  const focusPreview = React.useCallback(() => {
+    const el = previewWrapRef.current
+    if (!el) return
+    try {
+      ;(el as any).focus({ preventScroll: true })
+    } catch {
+      el.focus()
+    }
+  }, [])
 
   const inputRowIdsRef = React.useRef<string[]>([])
   const constantRowIdsRef = React.useRef<Map<string, string>>(new Map())
@@ -327,7 +363,8 @@ export function TemplateDesigner({
   const alignmentGuidesPt = React.useMemo(() => {
     if (!selected) return { xPts: [], yPts: [] }
 
-    const tolPt = 2
+    // Slightly more forgiving during drag/resize so guides appear before the snap.
+    const tolPt = drag || resizeDrag ? 4 : 2
     const xPts = new Set<number>()
     const yPts = new Set<number>()
 
@@ -368,7 +405,141 @@ export function TemplateDesigner({
     }
 
     return { xPts: [...xPts].sort((a, b) => a - b), yPts: [...yPts].sort((a, b) => a - b) }
-  }, [selected, template.elements])
+  }, [drag, resizeDrag, selected, template.elements])
+
+  const spacingGuidesPt = React.useMemo((): SpacingGuideLinePt[] => {
+    if (!drag && !showNudgeGuides) return []
+    if (!selected) return []
+
+    const tolPt = 4
+    const guides: SpacingGuideLinePt[] = []
+
+    const selLeft = selected.rect.xPt
+    const selRight = selected.rect.xPt + selected.rect.wPt
+    const selCenterX = selected.rect.xPt + selected.rect.wPt / 2
+    const selTop = selected.rect.yPt
+    const selBottom = selected.rect.yPt + selected.rect.hPt
+    const selCenterY = selected.rect.yPt + selected.rect.hPt / 2
+
+    const selXs = [selLeft, selCenterX, selRight]
+    const selYs = [selTop, selCenterY, selBottom]
+
+    const alignedY: Array<{ el: TemplateV1Element; kind: 'top' | 'center' | 'bottom' }> = []
+    const alignedX: Array<{ el: TemplateV1Element; kind: 'left' | 'center' | 'right' }> = []
+
+    for (const other of template.elements) {
+      if (other.id === selected.id) continue
+
+      const oLeft = other.rect.xPt
+      const oRight = other.rect.xPt + other.rect.wPt
+      const oCenterX = other.rect.xPt + other.rect.wPt / 2
+      const oTop = other.rect.yPt
+      const oBottom = other.rect.yPt + other.rect.hPt
+      const oCenterY = other.rect.yPt + other.rect.hPt / 2
+
+      const oXs = [oLeft, oCenterX, oRight]
+      const oYs = [oTop, oCenterY, oBottom]
+
+      // Horizontal spacing: only if Y anchors align (top/center/bottom).
+      const yMatches: Array<{ kind: 'top' | 'center' | 'bottom'; dy: number }> = []
+      ;(['top', 'center', 'bottom'] as const).forEach((kind, idx) => {
+        for (let j = 0; j < oYs.length; j += 1) {
+          const dy = oYs[j]! - selYs[idx]!
+          if (Math.abs(dy) <= tolPt) yMatches.push({ kind, dy })
+        }
+      })
+      if (yMatches.length > 0) {
+        // Prefer the closest match
+        yMatches.sort((a, b) => Math.abs(a.dy) - Math.abs(b.dy))
+        alignedY.push({ el: other, kind: yMatches[0]!.kind })
+      }
+
+      // Vertical spacing: only if X anchors align (left/center/right).
+      const xMatches: Array<{ kind: 'left' | 'center' | 'right'; dx: number }> = []
+      ;(['left', 'center', 'right'] as const).forEach((kind, idx) => {
+        for (let j = 0; j < oXs.length; j += 1) {
+          const dx = oXs[j]! - selXs[idx]!
+          if (Math.abs(dx) <= tolPt) xMatches.push({ kind, dx })
+        }
+      })
+      if (xMatches.length > 0) {
+        xMatches.sort((a, b) => Math.abs(a.dx) - Math.abs(b.dx))
+        alignedX.push({ el: other, kind: xMatches[0]!.kind })
+      }
+    }
+
+    const formatMm = (pt: number): string => {
+      const mm = ptToMm(Math.abs(pt))
+      const rounded = Math.round(mm * 10) / 10
+      return Number.isInteger(rounded) ? `${rounded} mm` : `${rounded.toFixed(1)} mm`
+    }
+
+    // Horizontal spacing guides (left/right neighbors) if there is any aligned-in-Y element.
+    if (alignedY.length > 0) {
+      let bestLeft: { el: TemplateV1Element; gapPt: number } | null = null
+      let bestRight: { el: TemplateV1Element; gapPt: number } | null = null
+
+      for (const { el: other } of alignedY) {
+        const oLeft = other.rect.xPt
+        const oRight = other.rect.xPt + other.rect.wPt
+
+        // Other is to the left
+        if (oRight <= selLeft) {
+          const gapPt = selLeft - oRight
+          if (!bestLeft || gapPt < bestLeft.gapPt) bestLeft = { el: other, gapPt }
+        }
+        // Other is to the right
+        if (oLeft >= selRight) {
+          const gapPt = oLeft - selRight
+          if (!bestRight || gapPt < bestRight.gapPt) bestRight = { el: other, gapPt }
+        }
+      }
+
+      const yPt = selCenterY
+      if (bestLeft) {
+        const oRight = bestLeft.el.rect.xPt + bestLeft.el.rect.wPt
+        guides.push({ x1Pt: oRight, y1Pt: yPt, x2Pt: selLeft, y2Pt: yPt, label: formatMm(bestLeft.gapPt) })
+      }
+      if (bestRight) {
+        const oLeft = bestRight.el.rect.xPt
+        guides.push({ x1Pt: selRight, y1Pt: yPt, x2Pt: oLeft, y2Pt: yPt, label: formatMm(bestRight.gapPt) })
+      }
+    }
+
+    // Vertical spacing guides (top/bottom neighbors) if there is any aligned-in-X element.
+    if (alignedX.length > 0) {
+      let bestTop: { el: TemplateV1Element; gapPt: number } | null = null
+      let bestBottom: { el: TemplateV1Element; gapPt: number } | null = null
+
+      for (const { el: other } of alignedX) {
+        const oTop = other.rect.yPt
+        const oBottom = other.rect.yPt + other.rect.hPt
+
+        // Other is above
+        if (oBottom <= selTop) {
+          const gapPt = selTop - oBottom
+          if (!bestTop || gapPt < bestTop.gapPt) bestTop = { el: other, gapPt }
+        }
+        // Other is below
+        if (oTop >= selBottom) {
+          const gapPt = oTop - selBottom
+          if (!bestBottom || gapPt < bestBottom.gapPt) bestBottom = { el: other, gapPt }
+        }
+      }
+
+      const xPt = selCenterX
+      if (bestTop) {
+        const oBottom = bestTop.el.rect.yPt + bestTop.el.rect.hPt
+        guides.push({ x1Pt: xPt, y1Pt: oBottom, x2Pt: xPt, y2Pt: selTop, label: formatMm(bestTop.gapPt) })
+      }
+      if (bestBottom) {
+        const oTop = bestBottom.el.rect.yPt
+        guides.push({ x1Pt: xPt, y1Pt: selBottom, x2Pt: xPt, y2Pt: oTop, label: formatMm(bestBottom.gapPt) })
+      }
+    }
+
+    return guides
+  }, [drag, selected, showNudgeGuides, template.elements])
 
   const getLineEndpointsPt = React.useCallback((el: LineElementV1) => {
     const hasExplicit =
@@ -520,24 +691,65 @@ export function TemplateDesigner({
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         nudgeSelectedBy(-step, 0)
+        triggerNudgeGuides()
       } else if (e.key === 'ArrowRight') {
         e.preventDefault()
         nudgeSelectedBy(step, 0)
+        triggerNudgeGuides()
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         nudgeSelectedBy(0, -step)
+        triggerNudgeGuides()
       } else if (e.key === 'ArrowDown') {
         e.preventDefault()
         nudgeSelectedBy(0, step)
+        triggerNudgeGuides()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [nudgeSelectedBy, redo, selected, undo])
+  }, [nudgeSelectedBy, redo, selected, triggerNudgeGuides, undo])
 
   React.useEffect(() => {
     if (!drag) return
+
+    const snapTolPt = 4
+
+    const getBestSnapDelta = (targets: number[], others: number[]): number => {
+      let best: { abs: number; delta: number } | null = null
+      for (const t of targets) {
+        for (const o of others) {
+          const delta = o - t
+          const abs = Math.abs(delta)
+          if (abs <= snapTolPt && (!best || abs < best.abs)) best = { abs, delta }
+        }
+      }
+      return best ? best.delta : 0
+    }
+
+    const getSnapDeltaForRect = (
+      rect: { xPt: number; yPt: number; wPt: number; hPt: number },
+      others: Array<{ xPt: number; yPt: number; wPt: number; hPt: number }>,
+    ): { dxPt: number; dyPt: number } => {
+      const left = rect.xPt
+      const right = rect.xPt + rect.wPt
+      const centerX = rect.xPt + rect.wPt / 2
+      const top = rect.yPt
+      const bottom = rect.yPt + rect.hPt
+      const centerY = rect.yPt + rect.hPt / 2
+
+      const otherXs: number[] = []
+      const otherYs: number[] = []
+      for (const o of others) {
+        otherXs.push(o.xPt, o.xPt + o.wPt / 2, o.xPt + o.wPt)
+        otherYs.push(o.yPt, o.yPt + o.hPt / 2, o.yPt + o.hPt)
+      }
+
+      const dxPt = getBestSnapDelta([left, centerX, right], otherXs)
+      const dyPt = getBestSnapDelta([top, centerY, bottom], otherYs)
+      return { dxPt, dyPt }
+    }
 
     const onMove = (ev: PointerEvent) => {
       const current = templateRef.current
@@ -556,12 +768,39 @@ export function TemplateDesigner({
           x2Pt: base.x2Pt + dxPt,
           y2Pt: base.y2Pt + dyPt,
         })
-        nextEl = clampLineToPage(moved, drag.pageWPt, drag.pageHPt)
+        const clamped = clampLineToPage(moved, drag.pageWPt, drag.pageHPt)
+
+        const others = current.elements
+          .filter((o) => o.id !== el.id)
+          .map((o) => ({ xPt: o.rect.xPt, yPt: o.rect.yPt, wPt: o.rect.wPt, hPt: o.rect.hPt }))
+        const snap = getSnapDeltaForRect(clamped.rect, others)
+
+        if (snap.dxPt !== 0 || snap.dyPt !== 0) {
+          const next = normalizeLineFromEndpoints(clamped, {
+            x1Pt: (clamped.x1Pt ?? base.x1Pt) + snap.dxPt,
+            y1Pt: (clamped.y1Pt ?? base.y1Pt) + snap.dyPt,
+            x2Pt: (clamped.x2Pt ?? base.x2Pt) + snap.dxPt,
+            y2Pt: (clamped.y2Pt ?? base.y2Pt) + snap.dyPt,
+          })
+          nextEl = clampLineToPage(next, drag.pageWPt, drag.pageHPt)
+        } else {
+          nextEl = clamped
+        }
       } else {
         const maxX = Math.max(0, drag.pageWPt - el.rect.wPt)
         const maxY = Math.max(0, drag.pageHPt - el.rect.hPt)
-        const xPt = clampNumber(drag.baseXPt + dxPt, 0, maxX)
-        const yPt = clampNumber(drag.baseYPt + dyPt, 0, maxY)
+        let xPt = clampNumber(drag.baseXPt + dxPt, 0, maxX)
+        let yPt = clampNumber(drag.baseYPt + dyPt, 0, maxY)
+
+        const candidateRect = { xPt, yPt, wPt: el.rect.wPt, hPt: el.rect.hPt }
+        const others = current.elements
+          .filter((o) => o.id !== el.id)
+          .map((o) => ({ xPt: o.rect.xPt, yPt: o.rect.yPt, wPt: o.rect.wPt, hPt: o.rect.hPt }))
+        const snap = getSnapDeltaForRect(candidateRect, others)
+
+        if (snap.dxPt !== 0) xPt = clampNumber(xPt + snap.dxPt, 0, maxX)
+        if (snap.dyPt !== 0) yPt = clampNumber(yPt + snap.dyPt, 0, maxY)
+
         nextEl = { ...el, rect: { ...el.rect, xPt, yPt } } as any
       }
 
@@ -673,6 +912,18 @@ export function TemplateDesigner({
     const minWPt = 12
     const minHPt = 8
 
+    const snapTolPt = 4
+
+    const getBestSnapDelta = (target: number, others: number[]): number => {
+      let best: { abs: number; delta: number } | null = null
+      for (const o of others) {
+        const delta = o - target
+        const abs = Math.abs(delta)
+        if (abs <= snapTolPt && (!best || abs < best.abs)) best = { abs, delta }
+      }
+      return best ? best.delta : 0
+    }
+
     const onMove = (ev: PointerEvent) => {
       const current = templateRef.current
       const el = current.elements.find((e) => e.id === resizeDrag.id)
@@ -718,6 +969,64 @@ export function TemplateDesigner({
       }
 
       // Clamp within page
+      xPt = clampNumber(xPt, 0, Math.max(0, resizeDrag.pageWPt - wPt))
+      yPt = clampNumber(yPt, 0, Math.max(0, resizeDrag.pageHPt - hPt))
+
+      // Snap-to-alignment (edges only) while resizing.
+      const othersX: number[] = []
+      const othersY: number[] = []
+      for (const o of current.elements) {
+        if (o.id === el.id) continue
+        othersX.push(o.rect.xPt, o.rect.xPt + o.rect.wPt / 2, o.rect.xPt + o.rect.wPt)
+        othersY.push(o.rect.yPt, o.rect.yPt + o.rect.hPt / 2, o.rect.yPt + o.rect.hPt)
+      }
+
+      const left = xPt
+      const right = xPt + wPt
+      const top = yPt
+      const bottom = yPt + hPt
+
+      // Apply snap deltas to moving edges only.
+      if (affectsLeft && !affectsRight) {
+        const d = getBestSnapDelta(left, othersX)
+        if (d !== 0) {
+          xPt += d
+          wPt -= d
+        }
+      }
+      if (affectsRight && !affectsLeft) {
+        const d = getBestSnapDelta(right, othersX)
+        if (d !== 0) {
+          wPt += d
+        }
+      }
+      if (affectsTop && !affectsBottom) {
+        const d = getBestSnapDelta(top, othersY)
+        if (d !== 0) {
+          yPt += d
+          hPt -= d
+        }
+      }
+      if (affectsBottom && !affectsTop) {
+        const d = getBestSnapDelta(bottom, othersY)
+        if (d !== 0) {
+          hPt += d
+        }
+      }
+
+      // Re-enforce minimum sizes (preserve anchored edge).
+      if (wPt < minWPt) {
+        const r = xPt + wPt
+        wPt = minWPt
+        if (affectsLeft && !affectsRight) xPt = r - wPt
+      }
+      if (hPt < minHPt) {
+        const b = yPt + hPt
+        hPt = minHPt
+        if (affectsTop && !affectsBottom) yPt = b - hPt
+      }
+
+      // Re-clamp after snapping.
       xPt = clampNumber(xPt, 0, Math.max(0, resizeDrag.pageWPt - wPt))
       yPt = clampNumber(yPt, 0, Math.max(0, resizeDrag.pageHPt - hPt))
 
@@ -773,6 +1082,7 @@ export function TemplateDesigner({
     const next = { ...latest, elements: [...latest.elements, el] }
     applyTemplateChange(next)
     setSelectedId(el.id)
+    focusPreview()
   }
 
   const addImage = () => {
@@ -787,6 +1097,7 @@ export function TemplateDesigner({
     const next = { ...latest, elements: [...latest.elements, el] }
     applyTemplateChange(next)
     setSelectedId(el.id)
+    focusPreview()
   }
 
   const addLine = () => {
@@ -805,6 +1116,7 @@ export function TemplateDesigner({
     const next = { ...latest, elements: [...latest.elements, el] }
     applyTemplateChange(next)
     setSelectedId(el.id)
+    focusPreview()
   }
 
   const duplicateElement = (el: TemplateV1Element) => {
@@ -835,6 +1147,7 @@ export function TemplateDesigner({
 
     applyTemplateChange({ ...latest, elements: [...latest.elements, clone] })
     setSelectedId(clone.id)
+    focusPreview()
   }
 
   const duplicateSelected = () => {
@@ -877,6 +1190,7 @@ export function TemplateDesigner({
     e.stopPropagation()
 
     setSelectedId(id)
+    focusPreview()
 
     const latest = templateRef.current
     const el = latest.elements.find((x) => x.id === id)
@@ -1304,7 +1618,10 @@ export function TemplateDesigner({
                       >
                         <button
                           type="button"
-                          onClick={() => setSelectedId(e.id)}
+                          onClick={() => {
+                            setSelectedId(e.id)
+                            focusPreview()
+                          }}
                           style={{
                             //flex: 1,
                             width: '70%',
@@ -2333,7 +2650,11 @@ export function TemplateDesigner({
           <div style={{ fontWeight: 700 }}>Live preview</div>
           <div style={{ fontSize: 12, opacity: 0.75 }}>Tip: drag elements to move them.</div>
         </div>
-        <div ref={previewWrapRef} style={{ overflow: 'auto', border: '1px solid #E5E7EB', padding: 12 }}>
+        <div
+          ref={previewWrapRef}
+          tabIndex={0}
+          style={{ overflow: 'auto', border: '1px solid #E5E7EB', padding: 12, outline: 'none' }}
+        >
           <DocumentPreview
             template={template}
             ctx={ctx}
@@ -2341,8 +2662,12 @@ export function TemplateDesigner({
             interaction={{
               selectedId: isPdfPreviewing ? null : selectedId,
               onElementPointerDown,
-              onElementClick: (id) => setSelectedId(id),
+              onElementClick: (id) => {
+                setSelectedId(id)
+                focusPreview()
+              },
               alignmentGuidesPt: isPdfPreviewing ? undefined : alignmentGuidesPt,
+              spacingGuidesPt: isPdfPreviewing ? undefined : { lines: spacingGuidesPt },
               onElementResizePointerDown: (id, handle, e) => {
                 if (e.button !== 0) return
                 e.preventDefault()
@@ -2353,6 +2678,7 @@ export function TemplateDesigner({
                 if (!el || (el.type !== 'text' && el.type !== 'image')) return
 
                 setSelectedId(id)
+                focusPreview()
                 setDrag(null)
                 setLineEndpointDrag(null)
 
@@ -2380,6 +2706,7 @@ export function TemplateDesigner({
                 if (!el || el.type !== 'line') return
 
                 setSelectedId(id)
+                focusPreview()
 
                 setDrag(null)
                 setResizeDrag(null)
