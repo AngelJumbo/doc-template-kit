@@ -264,8 +264,10 @@ export function TemplateDesigner({
 
   const selected = template.elements.find((e) => e.id === selectedId) ?? null
 
+  // Elements list is rendered top-most first.
+  // Higher z means visually on top and should win click selection when overlapping.
   const elementsByZ = React.useMemo(() => {
-    return [...template.elements].sort((a, b) => (a.rect.z ?? 0) - (b.rect.z ?? 0))
+    return [...template.elements].sort((a, b) => (b.rect.z ?? 0) - (a.rect.z ?? 0))
   }, [template.elements])
 
   const pageSizePt = React.useMemo(
@@ -277,18 +279,24 @@ export function TemplateDesigner({
     (orderedIds: string[]) => {
       const latest = templateRef.current
       const byId = new Map(latest.elements.map((e) => [e.id, e] as const))
-      const nextElements = orderedIds
-        .map((id, idx) => {
-          const el = byId.get(id)
-          if (!el) return null
-          return { ...el, rect: { ...el.rect, z: idx + 1 } } as TemplateV1Element
-        })
-        .filter(Boolean) as TemplateV1Element[]
+      const kept: TemplateV1Element[] = []
 
-      // Keep any elements not present (shouldn't happen) appended.
-      for (const el of latest.elements) {
-        if (!orderedIds.includes(el.id)) nextElements.push({ ...el, rect: { ...el.rect, z: nextElements.length + 1 } })
+      for (const id of orderedIds) {
+        const el = byId.get(id)
+        if (el) kept.push(el)
       }
+
+      // Keep any elements not present (shouldn't happen) appended at the back.
+      for (const el of latest.elements) {
+        if (!orderedIds.includes(el.id)) kept.push(el)
+      }
+
+      // Assign z so that the first element in the list is the top-most (highest z).
+      const total = kept.length
+      const nextElements = kept.map((el, idx) => {
+        const z = total - idx
+        return { ...el, rect: { ...el.rect, z } }
+      })
 
       applyTemplateChange({ ...latest, elements: nextElements })
     },
@@ -300,7 +308,9 @@ export function TemplateDesigner({
       const ordered = elementsByZ.map((e) => e.id)
       const idx = ordered.indexOf(id)
       if (idx < 0) return
-      const nextIdx = idx + dir
+      // In this UI, the list is top-most first.
+      // dir = 1 means "front" (move toward index 0), dir = -1 means "back" (move toward the end).
+      const nextIdx = dir === 1 ? idx - 1 : idx + 1
       if (nextIdx < 0 || nextIdx >= ordered.length) return
       const next = [...ordered]
       ;[next[idx], next[nextIdx]] = [next[nextIdx], next[idx]]
@@ -1335,7 +1345,7 @@ export function TemplateDesigner({
                               cursor: 'pointer',
                             }}
                           >
-                            ▲
+                            ▼
                           </button>
                           <button
                             type="button"
@@ -1354,7 +1364,7 @@ export function TemplateDesigner({
                               cursor: 'pointer',
                             }}
                           >
-                            ▼
+                            ▲
                           </button>
                           <button
                             type="button"
