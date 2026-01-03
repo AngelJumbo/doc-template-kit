@@ -70,6 +70,16 @@ export const defaultTemplate: DocumentTemplateV1 = {
       style: { fontSizePt: 12 },
     },
     {
+      id: 'qr_loan',
+      type: 'qr',
+      rect: { xPt: 456, yPt: 145, wPt: 120, hPt: 120, z: 2 },
+      dataTpl: 'Loan: {{ inputs.loanNumber }}',
+      ecc: 'M',
+      marginModules: 4,
+      fgColor: '#000000',
+      bgColor: '#ffffff',
+    },
+    {
       id: 'txt_address',
       type: 'text',
       rect: { xPt: 36, yPt: 235, wPt: 540, hPt: 60, z: 1 },

@@ -927,7 +927,7 @@ export function TemplateDesigner({
     const onMove = (ev: PointerEvent) => {
       const current = templateRef.current
       const el = current.elements.find((e) => e.id === resizeDrag.id)
-      if (!el || (el.type !== 'text' && el.type !== 'image')) return
+      if (!el || (el.type !== 'text' && el.type !== 'image' && el.type !== 'qr')) return
 
       const dxPt = pxToPt(ev.clientX - resizeDrag.startClientX)
       const dyPt = pxToPt(ev.clientY - resizeDrag.startClientY)
@@ -1112,6 +1112,24 @@ export function TemplateDesigner({
       thicknessPt: 1,
       color: '#111827',
     }
+    const latest = templateRef.current
+    const next = { ...latest, elements: [...latest.elements, el] }
+    applyTemplateChange(next)
+    setSelectedId(el.id)
+    focusPreview()
+  }
+
+  const addQr = () => {
+    const el: TemplateV1Element = {
+      id: newId('qr'),
+      type: 'qr',
+      rect: { xPt: 420, yPt: 145, wPt: 120, hPt: 120, z: 2 },
+      dataTpl: 'https://example.com',
+      ecc: 'M',
+      marginModules: 4,
+      fgColor: '#000000',
+      bgColor: '#ffffff',
+    } as any
     const latest = templateRef.current
     const next = { ...latest, elements: [...latest.elements, el] }
     applyTemplateChange(next)
@@ -1597,6 +1615,7 @@ export function TemplateDesigner({
                 <button onClick={addText}>+ Text</button>
                 <button onClick={addImage}>+ Image</button>
                 <button onClick={addLine}>+ Line</button>
+                <button onClick={addQr}>+ QR</button>
               </div>
 
               <div style={{ display: 'grid', gap: 10 }}>
@@ -2270,6 +2289,89 @@ export function TemplateDesigner({
                         </div>
                       )}
 
+                      {selected.type === 'qr' && (
+                        <div style={{ display: 'grid', gap: 10 }}>
+                          <label style={{ display: 'grid', gap: 4 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>QR data template</div>
+                            <textarea
+                              rows={3}
+                              value={selected.dataTpl}
+                              onChange={(e) => {
+                                const latest = templateRef.current
+                                const el = latest.elements.find((x) => x.id === selected.id)
+                                if (!el || el.type !== 'qr') return
+                                applyTemplateChange(updateElement(latest, { ...el, dataTpl: e.target.value } as any))
+                              }}
+                            />
+                          </label>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>ECC</div>
+                              <select
+                                value={selected.ecc ?? 'M'}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'qr') return
+                                  applyTemplateChange(updateElement(latest, { ...el, ecc: e.target.value as any } as any))
+                                }}
+                              >
+                                <option value="L">L</option>
+                                <option value="M">M</option>
+                                <option value="Q">Q</option>
+                                <option value="H">H</option>
+                              </select>
+                            </label>
+
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>Margin (modules)</div>
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={typeof selected.marginModules === 'number' ? selected.marginModules : 4}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'qr') return
+                                  const raw = e.target.value
+                                  const v = raw === '' ? undefined : Number(raw)
+                                  const next = Number.isFinite(v as any) ? Math.max(0, Math.floor(v as any)) : undefined
+                                  applyTemplateChange(updateElement(latest, { ...el, marginModules: next } as any))
+                                }}
+                              />
+                            </label>
+
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>Foreground</div>
+                              <input
+                                value={selected.fgColor ?? '#000000'}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'qr') return
+                                  applyTemplateChange(updateElement(latest, { ...el, fgColor: e.target.value } as any))
+                                }}
+                              />
+                            </label>
+
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>Background</div>
+                              <input
+                                value={selected.bgColor ?? '#ffffff'}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'qr') return
+                                  applyTemplateChange(updateElement(latest, { ...el, bgColor: e.target.value } as any))
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
                       {selected.type === 'line' && (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                           <label style={{ display: 'grid', gap: 4 }}>
@@ -2675,7 +2777,7 @@ export function TemplateDesigner({
 
                 const latest = templateRef.current
                 const el = latest.elements.find((x) => x.id === id)
-                if (!el || (el.type !== 'text' && el.type !== 'image')) return
+                if (!el || (el.type !== 'text' && el.type !== 'image' && el.type !== 'qr')) return
 
                 setSelectedId(id)
                 focusPreview()

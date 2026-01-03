@@ -36,7 +36,7 @@ export interface InputDefV1 {
     required?: boolean;
     defaultValue?: unknown;
 }
-export type ElementType = 'text' | 'image' | 'line' | 'table';
+export type ElementType = 'text' | 'image' | 'line' | 'table' | 'qr';
 export interface BaseElementV1 {
     id: string;
     type: ElementType;
@@ -98,7 +98,21 @@ export interface TableElementV1 extends BaseElementV1 {
     border?: boolean;
     fontSizePt?: number;
 }
-export type TemplateV1Element = TextElementV1 | ImageElementV1 | LineElementV1 | TableElementV1;
+export type QrErrorCorrectionLevelV1 = 'L' | 'M' | 'Q' | 'H';
+export interface QrElementV1 extends BaseElementV1 {
+    type: 'qr';
+    /** Template string used to produce the QR payload (e.g. 'https://...' or '{{ inputs.id }}'). */
+    dataTpl: string;
+    /** QR error correction level. */
+    ecc?: QrErrorCorrectionLevelV1;
+    /** Quiet zone in modules (library default is typically 4). */
+    marginModules?: number;
+    /** Foreground color (CSS color). */
+    fgColor?: string;
+    /** Background color (CSS color). */
+    bgColor?: string;
+}
+export type TemplateV1Element = TextElementV1 | ImageElementV1 | LineElementV1 | TableElementV1 | QrElementV1;
 export interface DocumentTemplateV1 {
     schemaVersion: SchemaVersion;
     meta: TemplateMeta;

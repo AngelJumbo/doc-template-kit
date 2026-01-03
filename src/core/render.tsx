@@ -1,10 +1,12 @@
 import React from 'react'
+import * as QRCode from 'qrcode'
 import type {
   AssetResolver,
   DocumentTemplateV1,
   EvalContext,
   ImageElementV1,
   LineElementV1,
+  QrElementV1,
   TableElementV1,
   TemplateV1Element,
   TextElementV1,
@@ -409,6 +411,70 @@ function ImageEl({ el, url, interaction }: { el: ImageElementV1; url: string; in
   )
 }
 
+function QrEl({ el, url, interaction }: { el: QrElementV1; url: string; interaction?: PreviewInteraction }) {
+  return (
+    <div
+      style={{
+        ...rectStyle(el.rect),
+        outline: interaction?.selectedId === el.id ? '2px solid #6366F1' : undefined,
+        outlineOffset: 1,
+        cursor: interaction ? 'move' : undefined,
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: el.bgColor ?? '#ffffff',
+      }}
+      onPointerDown={(e) => interaction?.onElementPointerDown?.(el.id, e)}
+      onClick={() => interaction?.onElementClick?.(el.id)}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt="QR"
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          crossOrigin="anonymous"
+        />
+      ) : null}
+
+      {interaction?.selectedId === el.id && interaction.onElementResizePointerDown && (
+        <>
+          {(
+            [
+              { key: 'nw', left: 0, top: 0, cursor: 'nwse-resize' },
+              { key: 'n', left: '50%', top: 0, cursor: 'ns-resize' },
+              { key: 'ne', left: '100%', top: 0, cursor: 'nesw-resize' },
+              { key: 'e', left: '100%', top: '50%', cursor: 'ew-resize' },
+              { key: 'se', left: '100%', top: '100%', cursor: 'nwse-resize' },
+              { key: 's', left: '50%', top: '100%', cursor: 'ns-resize' },
+              { key: 'sw', left: 0, top: '100%', cursor: 'nesw-resize' },
+              { key: 'w', left: 0, top: '50%', cursor: 'ew-resize' },
+            ] as const
+          ).map((h) => (
+            <div
+              key={h.key}
+              onPointerDown={(e) => interaction.onElementResizePointerDown?.(el.id, h.key, e)}
+              style={{
+                position: 'absolute',
+                left: h.left,
+                top: h.top,
+                transform: 'translate(-50%, -50%)',
+                width: 10,
+                height: 10,
+                borderRadius: 999,
+                background: '#ffffff',
+                border: '2px solid #6366F1',
+                boxSizing: 'border-box',
+                cursor: h.cursor,
+              }}
+            />
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 function sortElements(elements: TemplateV1Element[]): TemplateV1Element[] {
   return [...elements].sort((a, b) => (a.rect.z ?? 0) - (b.rect.z ?? 0))
 }
@@ -431,6 +497,7 @@ export function DocumentPreview({
   const hPx = ptToPx(hPt)
 
   const [imageUrls, setImageUrls] = React.useState<Record<string, string>>({})
+  const [qrUrls, setQrUrls] = React.useState<Record<string, string>>({})
 
   React.useEffect(() => {
     let cancelled = false
@@ -460,6 +527,47 @@ export function DocumentPreview({
       cancelled = true
     }
   }, [template, assetResolver])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      const entries = await Promise.all(
+        template.elements
+          .filter((e): e is QrElementV1 => e.type === 'qr')
+          .map(async (el) => {
+            try {
+              const data = String(renderTemplateString(el.dataTpl ?? '', ctx) ?? '')
+              if (!data) return [el.id, ''] as const
+
+              const sizePx = Math.max(ptToPx(el.rect.wPt), ptToPx(el.rect.hPt))
+              const width = Math.max(64, Math.ceil(sizePx * 2))
+
+              const url = await QRCode.toDataURL(data, {
+                width,
+                margin: el.marginModules,
+                errorCorrectionLevel: el.ecc,
+                color: {
+                  dark: el.fgColor ?? '#000000',
+                  light: el.bgColor ?? '#ffffff',
+                },
+              })
+
+              return [el.id, url] as const
+            } catch {
+              return [el.id, ''] as const
+            }
+          }),
+      )
+
+      if (!cancelled) setQrUrls(Object.fromEntries(entries))
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [template, ctx])
 
   return (
     <div
@@ -545,6 +653,11 @@ export function DocumentPreview({
         if (el.type === 'image') {
           const url = imageUrls[el.imageRef]
           return url ? <ImageEl key={el.id} el={el} url={url} interaction={interaction} /> : null
+        }
+
+        if (el.type === 'qr') {
+          const url = qrUrls[el.id]
+          return <QrEl key={el.id} el={el} url={url ?? ''} interaction={interaction} />
         }
 
         return null
