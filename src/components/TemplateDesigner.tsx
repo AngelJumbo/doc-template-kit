@@ -2025,6 +2025,23 @@ export function TemplateDesigner({
                                 }}
                               />
                             </label>
+
+                            <label style={{ display: 'grid', gap: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>Text color</div>
+                              <input
+                                value={selected.style?.color ?? '#111827'}
+                                onChange={(e) => {
+                                  const latest = templateRef.current
+                                  const el = latest.elements.find((x) => x.id === selected.id)
+                                  if (!el || el.type !== 'text') return
+
+                                  const raw = e.target.value
+                                  const nextColor = raw.trim() === '' ? undefined : raw
+                                  const nextStyle: TextStyleV1 = { ...(el.style ?? {}), color: nextColor }
+                                  applyTemplateChange(updateElement(latest, { ...el, style: nextStyle } as any))
+                                }}
+                              />
+                            </label>
                           </div>
 
                           <div style={{ display: 'grid', gap: 8 }}>
